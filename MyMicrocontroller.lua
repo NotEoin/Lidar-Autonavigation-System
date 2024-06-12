@@ -44,6 +44,8 @@ do
 
         simulator:setInputBool(1, simulator:getIsToggled(1))       -- make button 1 a toggle, for input.getBool(32)
 
+        simulator:setInputNumber(18, 4000)  -- set distance reading for laser
+
         simulator:setInputNumber(19, 1000)  -- set target x coord
         simulator:setInputNumber(20, 1000)  -- set target y coord
 
@@ -194,8 +196,7 @@ function getLaserTargetCoordinates() --gets the coords of the laser point
 end
 
 function addObstructedNode(worldCoord)-- add a node to the obstruction graph
-    if laserDistanceReading < maxLaserRange then --if the detected target is within the maximum specified range
-
+    if laserDistanceReading < maxLaserRange and laserDistanceReading > 0 then --if the detected target is within the maximum specified range
         local tableCoord = worldToTable(worldCoord) --convert the world coordinates to a suitable table entry
 
         if not isObstructed(tableCoord) then --if the node is not already in the graph
@@ -210,16 +211,16 @@ end
 
 function isObstructed(node) --check if a node is obstructed
     for _, tableNode in ipairs(obstructedNodesTable) do --iterate through the table of obstructions
-        if tableNode.x == node.x and tableNode.y == node.y then
+        if tableNode.x == node.x and tableNode.y == node.y then --if the node is in the table, return true
             return true
         end
     end
     return false
 end
 
--- Heuristic function for A* (Manhattan distance)
+-- euclidian distance for A* algorithm heuristic score
 function heuristic(node, goal)
-    return math.abs(node.x - goal.x) + math.abs(node.y - goal.y)
+    return math.sqrt((node.x - goal.x)^2 + (node.y - goal.y)^2)
 end
 
 -- Function to retrieve neighbors of a node
@@ -230,6 +231,20 @@ function getNeighbors(node)
         {x = node.x, y = node.y + 1},
         {x = node.x, y = node.y - 1}
     }
+
+    --if neither of the diagonals are obstructed, add them to the neighbors list
+    if not (isObstructed(neighbors[1]) or isObstructed(neighbors[3])) then
+        table.insert(neighbors, {x = node.x + 1, y = node.y + 1})
+    end
+    if not (isObstructed(neighbors[1]) or isObstructed(neighbors[4])) then
+        table.insert(neighbors, {x = node.x + 1, y = node.y - 1})
+    end
+    if not (isObstructed(neighbors[2]) or isObstructed(neighbors[3])) then
+        table.insert(neighbors, {x = node.x - 1, y = node.y + 1})
+    end
+    if not (isObstructed(neighbors[2]) or isObstructed(neighbors[4])) then
+        table.insert(neighbors, {x = node.x - 1, y = node.y - 1})
+    end
     return neighbors
 end
 
@@ -242,22 +257,51 @@ function reconstructPath(cameFrom, current) --reconstruct the path from the came
     return totalPath
 end
 
--- A* pathfinding algorithm
-function aStar(start, goal)
-    local openSet = {start} -- The set of nodes to be evaluated
-    local cameFrom = {} -- The map of navigated nodes
-    local gScore = {[start.x .. "," .. start.y] = 0} -- Cost from start along best known path
-    local fScore = {[start.x .. "," .. start.y] = heuristic(start, goal)} -- Estimated total cost from start to goal 
+function checkPathForObstructions(path) --check if the path is obstructed
+    if path == nil then
+        return true
+    end
+    for _, node in ipairs(path) do
+        if isObstructed(node) then
+            return true
+        end
+    end
+    return false
+end
 
-    while #openSet > 0 do
+openSet = {} -- The set of nodes to be evaluated
+cameFrom = {} -- The map of navigated nodes
+gScore = {} -- Cost from start along best known path
+fScore = {} -- Estimated total cost from start to goal
+
+start = {x=0, y=0} -- Start node
+current = {x=0, y=0} -- Current node
+
+refreshPathFinding = false -- Flag to refresh the path
+pathFound = false -- Flag to check if a path has been found
+
+-- A* pathfinding algorithm
+function aStar(goal)   
+    -- check if start or goal have changed
+    if refreshPathFinding then
+        refreshPathFinding = false
+
+        start = startNode --set the start node for the pathfinding algorithm
+
+        openSet = {start} -- The set of nodes to be evaluated
+        cameFrom = {} -- The map of navigated nodes
+        current = start -- Current node
+
+        gScore = {[start.x .. "," .. start.y] = 0} -- Cost from start along best known path
+        fScore = {[start.x .. "," .. start.y] = heuristic(start, goal)} -- Estimated total cost from start to goal
+    end
+
+    pathFound = current.x == goal.x and current.y == goal.y
+
+    if #openSet > 0 and not (pathFound) then
         -- Find the node in openSet with the lowest fScore
         table.sort(openSet, function(a, b) return fScore[a.x .. "," .. a.y] < fScore[b.x .. "," .. b.y] end)
-        local current = table.remove(openSet, 1)
-
-        -- if the goal is reached, recpnstruct the path and return it
-        if current.x == goal.x and current.y == goal.y then
-            return reconstructPath(cameFrom, current)
-        end
+        current = table.remove(openSet, 1)        
 
         -- get all neighbors of the current node
         for _, neighbor in ipairs(getNeighbors(current)) do
@@ -273,9 +317,11 @@ function aStar(start, goal)
             end
         end
     end
-
-    return nil -- No path found
+    return reconstructPath(cameFrom, current) -- reconstruct the path and return it
+    --return nil -- No path found
 end
+
+oldGoal = {x = 0, y = 0} --set the old goal to 0,0
 
 function onTick()-- the main function that runs every tick
 
@@ -295,12 +341,24 @@ function onTick()-- the main function that runs every tick
 
     startNode = worldToTable({x = currentGPSPositionX, y = currentGPSPositionY}) --convert the current GPS position to a table entry
     goalNode = worldToTable({x = gpsTargetX, y = gpsTargetY}) --convert the target GPS position to a table entry
-    
+
     --when input 1 is on, go through the calculations
     if scriptIsEnabled then
         laserSweep() --run the laser sweep function
         addObstructedNode(getLaserTargetCoordinates()) --run the addObstructedNode function
-        path = aStar(startNode, goalNode) --run the pathfinding algorithm
+
+        if start.x == 0 or start.y == 0 then 
+            start = startNode --set the start node for the pathfinding algorithm
+        end
+        if checkPathForObstructions(path) then --if the path is obstructed, restart pathfinding
+            start = startNode
+            refreshPathFinding = true
+        end
+        if goalNode.x ~= oldGoal.x or goalNode.y ~= oldGoal.y then --if the goal has changed, restart pathfinding
+            refreshPathFinding = true
+            oldGoal = goalNode
+        end
+        path = aStar(goalNode) --run the pathfinding algorithm
     end
 
 
@@ -334,7 +392,12 @@ function onDraw()
         previousNode = startNode -- set the previous node to the start node
         previousNodeScreenCoord = {x = 0, y = 0}
         currentNodeScreenCoord = {x = 0, y = 0}
-        screen.setColor(0,255,0)--set the colour of the path to green
+
+        screen.setColor(255,0,0)--set the colour of the path to red
+        if pathFound then --if the path has been found
+            screen.setColor(0,255,0)--set the colour of the path to green
+        end
+
         for _, node in ipairs(path) do --for each node in the path, plot a green line on the map
             previousNodeScreenCoord.x, previousNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, previousNode.x * cellSize + epsilon, (previousNode.y+1) * cellSize + epsilon)
             currentNodeScreenCoord.x, currentNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, node.x * cellSize + epsilon, (node.y+1) * cellSize + epsilon)
