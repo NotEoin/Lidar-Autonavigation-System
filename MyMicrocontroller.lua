@@ -21,6 +21,7 @@ do
     simulator:setProperty("Resolution", 25)
     simulator:setProperty("Max Distance", 1000)
     simulator:setProperty("Sweep Speed", 1)
+    simulator:setProperty("Max gScore", 150)
 
     -- Runs every tick just before onTick; allows you to simulate the inputs changing
     ---@param simulator Simulator Use simulator:<function>() to set inputs etc.
@@ -44,17 +45,17 @@ do
 
         simulator:setInputBool(1, simulator:getIsToggled(1))       -- make button 1 a toggle, for input.getBool(32)
 
-        simulator:setInputNumber(18, 4000)  -- set distance reading for laser
+        simulator:setInputNumber(18, 999)  -- set distance reading for laser
 
-        simulator:setInputNumber(19, 1000)  -- set target x coord
-        simulator:setInputNumber(20, 1000)  -- set target y coord
+        simulator:setInputNumber(19, -1000)  -- set target x coord
+        simulator:setInputNumber(20, -100000)  -- set target y coord
 
 
         if simulator:getIsToggled(1) then --if button 1 is toggled
            simulator:setInputNumber(3, yPosition)   -- set y coord
            simulator:setInputNumber(1, xPosition)   -- set x coord
-           yPosition = yPosition + 0.1
-           xPosition = xPosition + 0.1
+           yPosition = yPosition + math.cos(targetYaw)
+           xPosition = xPosition + math.sin(targetYaw)
         end
 
 
@@ -78,9 +79,10 @@ ticks = 0
 
 buffersize = 5 --size of the buffer for the yaw values, this buffer compensates for 5 ticks of delay between yaw values and sensor readings
 
-resolution = property.getNumber("Resolution")
-maxLaserRange = property.getNumber("Max Distance")
-laserSweepSpeed = property.getNumber("Sweep Speed")
+resolution = property.getNumber("Resolution") --how many nodes the map is divided into
+maxLaserRange = property.getNumber("Max Distance") --maximum distance the laser can detect
+laserSweepSpeed = property.getNumber("Sweep Speed") --speed of the laser sweep
+maxGScore = property.getNumber("Max gScore") --maximum value for the gScore in the A* algorithm
 
 scale = maxLaserRange/500 --scale of the map on the screen, based on the max distance of laser detection
 cellSize = (maxLaserRange*2)/resolution --size of each square node on the map
@@ -209,6 +211,10 @@ function worldToTable(worldCoord) --converts world coordinates to table coordina
     return {x = math.floor(worldCoord.x/cellSize), y = math.floor(worldCoord.y/cellSize)}
 end
 
+function tableToWorld(tableCoord) -- converts table coordinates to world coordinates
+    return {x = (tableCoord.x + 0.5) * cellSize, y = (tableCoord.y + 0.5) * cellSize}
+end
+
 function isObstructed(node) --check if a node is obstructed
     for _, tableNode in ipairs(obstructedNodesTable) do --iterate through the table of obstructions
         if tableNode.x == node.x and tableNode.y == node.y then --if the node is in the table, return true
@@ -271,14 +277,19 @@ end
 
 openSet = {} -- The set of nodes to be evaluated
 cameFrom = {} -- The map of navigated nodes
+goesTo = {} -- The map of navigated nodes
 gScore = {} -- Cost from start along best known path
 fScore = {} -- Estimated total cost from start to goal
 
 start = {x=0, y=0} -- Start node
 current = {x=0, y=0} -- Current node
 
+path = {}
+
 refreshPathFinding = false -- Flag to refresh the path
 pathFound = false -- Flag to check if a path has been found
+
+maxGScoreReached = false
 
 -- A* pathfinding algorithm
 function aStar(goal)   
@@ -286,17 +297,20 @@ function aStar(goal)
     if refreshPathFinding then
         refreshPathFinding = false
 
-        start = startNode --set the start node for the pathfinding algorithm
+        start = currentNode --set the start node for the pathfinding algorithm
 
         openSet = {start} -- The set of nodes to be evaluated
         cameFrom = {} -- The map of navigated nodes
+        goesTo = {} -- The map of navigated nodes
         current = start -- Current node
 
         gScore = {[start.x .. "," .. start.y] = 0} -- Cost from start along best known path
         fScore = {[start.x .. "," .. start.y] = heuristic(start, goal)} -- Estimated total cost from start to goal
+
+        maxGScoreReached = false
     end
 
-    pathFound = current.x == goal.x and current.y == goal.y
+    pathFound = (current.x == goal.x and current.y == goal.y or maxGScoreReached) --check if the goal has been reached, or the maximum gScore has been reached
 
     if #openSet > 0 and not (pathFound) then
         -- Find the node in openSet with the lowest fScore
@@ -308,17 +322,79 @@ function aStar(goal)
             if not isObstructed(neighbor) then -- check if the neighbor node is obstructed
                 local tentative_gScore = gScore[current.x .. "," .. current.y] + 1
                 local neighborKey = neighbor.x .. "," .. neighbor.y
+                local currentKey = current.x .. "," .. current.y
                 if tentative_gScore < (gScore[neighborKey] or math.huge) then
                     cameFrom[neighborKey] = current -- best path so far
+                    if not goesTo[currentKey] then
+                        goesTo[currentKey] = {}
+                    end
+                    table.insert(goesTo[currentKey], neighbor)
                     gScore[neighborKey] = tentative_gScore -- update the gScore
                     fScore[neighborKey] = tentative_gScore + heuristic(neighbor, goal) -- update the fScore
-                    table.insert(openSet, neighbor) -- add the neighbor to the openSet for evaluation
+                    
+                    if gScore[neighborKey] > maxGScore then --if the gScore is greater than the maximum gScore, stop the search
+                        maxGScoreReached = true
+                    else
+                        table.insert(openSet, neighbor) -- add the neighbor to the openSet for evaluation
+                    end
                 end
             end
         end
     end
-    return reconstructPath(cameFrom, current) -- reconstruct the path and return it
-    --return nil -- No path found
+    totalIterations = 0
+
+    path = reconstructPath(cameFrom, current) --construct the most efficient path
+
+    if pathFound and contains(path, currentNode) then --if a path has been found and the first node is the current node
+        rebasedCameFrom = {} --reset the rebased cameFrom map
+        rebasedGoesTo = {} --reset the rebased goesTo map
+
+        if rebasePathTree(path[2]) then --if the next node is in the map
+            cameFrom = rebasedCameFrom --rebase the cameFrom map
+            goesTo = rebasedGoesTo --rebase the goesTo map
+        end
+    end
+
+    return path
+end
+
+rebasedCameFrom = {} --rebased cameFrom map
+rebasedGoesTo = {} --rebased goesTo map
+
+function contains(table, element) --check if a table contains an element
+    for _, value in ipairs(table) do
+        if value.x == element.x and value.y == element.y then
+            return true
+        end
+    end
+    return false
+end
+
+function rebasePathTree(node) --rebase the cameFrom and goesTo maps to a given node
+    if goesTo[node.x .. "," .. node.y] then
+        for _, neighbor in ipairs(goesTo[node.x .. "," .. node.y]) do
+            rebasedCameFrom[neighbor.x .. "," .. neighbor.y] = node
+            rebasedGoesTo[node.x .. "," .. node.y] = goesTo[node.x .. "," .. node.y]
+            rebasePathTree(neighbor)
+        end
+        return true
+    else
+        return false
+    end
+end
+
+targetYaw = 0 --set the target yaw to 0
+
+function getTargetYaw(target) --get the real world azimuth of the target relative to the current position
+    target = tableToWorld(target) --convert the table coordinates to world coordinates
+    return math.atan(target.x-currentGPSPositionX,target.y-currentGPSPositionY) --calculate the azimuth 
+end
+
+function navigate() --navigate to the target
+    if path[1] then
+        targetYaw = getTargetYaw(path[1]) --get the azimuth of the next node in the path
+    end
+    yawOutput = - (math.fmod(((-currentAzimuth/ (2*math.pi)))-(targetYaw/(2*math.pi))+1.5,1)-0.5) --calculate the difference between current azimuth and target azimuth in turns
 end
 
 oldGoal = {x = 0, y = 0} --set the old goal to 0,0
@@ -339,8 +415,10 @@ function onTick()-- the main function that runs every tick
     currentPitch = input.getNumber(15) * 2 * math.pi --retrieve the pitch in turns and convert to radians
     currentRoll = -input.getNumber(16) * 2 * math.pi --retrieve the roll in turns and convert to radians
 
-    startNode = worldToTable({x = currentGPSPositionX, y = currentGPSPositionY}) --convert the current GPS position to a table entry
+    currentNode = worldToTable({x = currentGPSPositionX, y = currentGPSPositionY}) --convert the current GPS position to a table entry
     goalNode = worldToTable({x = gpsTargetX, y = gpsTargetY}) --convert the target GPS position to a table entry
+
+    output.setNumber(3,cellSize)
 
     --when input 1 is on, go through the calculations
     if scriptIsEnabled then
@@ -348,10 +426,10 @@ function onTick()-- the main function that runs every tick
         addObstructedNode(getLaserTargetCoordinates()) --run the addObstructedNode function
 
         if start.x == 0 or start.y == 0 then 
-            start = startNode --set the start node for the pathfinding algorithm
+            start = currentNode --set the start node for the pathfinding algorithm
         end
         if checkPathForObstructions(path) then --if the path is obstructed, restart pathfinding
-            start = startNode
+            start = currentNode
             refreshPathFinding = true
         end
         if goalNode.x ~= oldGoal.x or goalNode.y ~= oldGoal.y then --if the goal has changed, restart pathfinding
@@ -359,6 +437,10 @@ function onTick()-- the main function that runs every tick
             oldGoal = goalNode
         end
         path = aStar(goalNode) --run the pathfinding algorithm
+
+        navigate() --get the yaw output for the next node in the path
+        output.setNumber(4, 4*yawOutput)
+
     end
 
 
@@ -372,8 +454,8 @@ function onDraw()
     --screen.setColor(0,0,255) -- plots the final yaw
     --screen.drawLine(sWidth/2, sHeight/2,(math.sin(finalYaw)*sWidth/2) + sWidth/2, sHeight/2-(math.cos(finalYaw)* sHeight/2))
 
-    --screen.setColor(0,255,0) -- plots the target azimuth
-    --screen.drawLine(sWidth/2, sHeight/2,(math.sin(targYaw)*sWidth/2) + sWidth/2, sHeight/2-(math.cos(targYaw)* sHeight/2))
+    screen.setColor(0,255,0) -- plots the target azimuth
+    screen.drawLine(sWidth/2, sHeight/2,(math.sin(targetYaw)*sWidth/2) + sWidth/2, sHeight/2-(math.cos(targetYaw)* sHeight/2))
 
     screen.setColor(255,0,0) -- plots the current azimuth
     screen.drawLine(sWidth/2, sHeight/2,(math.sin(-currentAzimuth)*sWidth/2) + sWidth/2, sHeight/2-(math.cos(currentAzimuth)* sHeight/2))
@@ -382,14 +464,14 @@ function onDraw()
     screen.drawLine(sWidth/2, sHeight/2 , (math.sin(laserSweepAngle * 2 * math.pi -currentAzimuth)*sWidth/2) + sWidth/2, sHeight/2-(math.cos(laserSweepAngle * 2 * math.pi -currentAzimuth)* sHeight/2))
 
     for _, node in ipairs(obstructedNodesTable) do --for each node in the obstruction table, plot a white square on the map
-        screenX, screenY = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, node.x * cellSize, (node.y+1) * cellSize)
+        screenX, screenY = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, node.x * cellSize, (node.y + 1) * cellSize)
         rectangleWidth = (sWidth/resolution)
         rectangleHeight = (sHeight/resolution)
         screen.drawRect(screenX,screenY,rectangleWidth,rectangleHeight)
     end
 
     if path then --if a path has been found
-        previousNode = startNode -- set the previous node to the start node
+        previousNode = currentNode -- set the previous node to the start node
         previousNodeScreenCoord = {x = 0, y = 0}
         currentNodeScreenCoord = {x = 0, y = 0}
 
@@ -399,8 +481,8 @@ function onDraw()
         end
 
         for _, node in ipairs(path) do --for each node in the path, plot a green line on the map
-            previousNodeScreenCoord.x, previousNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, previousNode.x * cellSize + epsilon, (previousNode.y+1) * cellSize + epsilon)
-            currentNodeScreenCoord.x, currentNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, node.x * cellSize + epsilon, (node.y+1) * cellSize + epsilon)
+            previousNodeScreenCoord.x, previousNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, previousNode.x * cellSize + epsilon, previousNode.y * cellSize + epsilon)
+            currentNodeScreenCoord.x, currentNodeScreenCoord.y = map.mapToScreen(currentGPSPositionX, currentGPSPositionY, scale, sWidth, sHeight, node.x * cellSize + epsilon, node.y * cellSize + epsilon)
             screen.drawLine(previousNodeScreenCoord.x, previousNodeScreenCoord.y, currentNodeScreenCoord.x, currentNodeScreenCoord.y)
         
             previousNode = node --copy the current node for the next iteration
