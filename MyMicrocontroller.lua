@@ -22,6 +22,7 @@ do
     simulator:setProperty("Max Distance", 1000)
     simulator:setProperty("Sweep Speed", 1)
     simulator:setProperty("Max gScore", 150)
+    simulator:setProperty("Smoothing Factor", 0.1)
 
     -- Runs every tick just before onTick; allows you to simulate the inputs changing
     ---@param simulator Simulator Use simulator:<function>() to set inputs etc.
@@ -83,6 +84,7 @@ resolution = property.getNumber("Resolution") --how many nodes the map is divide
 maxLaserRange = property.getNumber("Max Distance") --maximum distance the laser can detect
 laserSweepSpeed = property.getNumber("Sweep Speed") --speed of the laser sweep
 maxGScore = property.getNumber("Max gScore") --maximum value for the gScore in the A* algorithm
+smoothingFactor = property.getNumber("Smoothing Factor") --smoothing factor for the path
 
 scale = maxLaserRange/500 --scale of the map on the screen, based on the max distance of laser detection
 cellSize = (maxLaserRange*2)/resolution --size of each square node on the map
@@ -292,7 +294,7 @@ pathFound = false -- Flag to check if a path has been found
 maxGScoreReached = false
 
 -- A* pathfinding algorithm
-function aStar(goal)   
+function aStar(goal)
     -- check if start or goal have changed
     if refreshPathFinding then
         refreshPathFinding = false
@@ -318,9 +320,14 @@ function aStar(goal)
         current = table.remove(openSet, 1)        
 
         -- get all neighbors of the current node
-        for _, neighbor in ipairs(getNeighbors(current)) do
+        for index, neighbor in ipairs(getNeighbors(current)) do
             if not isObstructed(neighbor) then -- check if the neighbor node is obstructed
-                local tentative_gScore = gScore[current.x .. "," .. current.y] + 1
+                local tentative_gScore
+                if index > 4 then -- if the neighbor is a diagonal node, increment the gScore by 1.4
+                    tentative_gScore = gScore[current.x .. "," .. current.y] + 1.4
+                else -- if the neighbor is not a diagonal node, increment the gScore by 1
+                    tentative_gScore = gScore[current.x .. "," .. current.y] + 1
+                end
                 local neighborKey = neighbor.x .. "," .. neighbor.y
                 local currentKey = current.x .. "," .. current.y
                 if tentative_gScore < (gScore[neighborKey] or math.huge) then
@@ -349,13 +356,13 @@ function aStar(goal)
         rebasedCameFrom = {} --reset the rebased cameFrom map
         rebasedGoesTo = {} --reset the rebased goesTo map
 
-        if rebasePathTree(path[2]) then --if the next node is in the map
+        if rebasePathTree(currentNode) then --if the next node is in the map
             cameFrom = rebasedCameFrom --rebase the cameFrom map
             goesTo = rebasedGoesTo --rebase the goesTo map
         end
     end
 
-    return path
+    return path --merge the path and return it
 end
 
 rebasedCameFrom = {} --rebased cameFrom map
@@ -386,15 +393,51 @@ end
 targetYaw = 0 --set the target yaw to 0
 
 function getTargetYaw(target) --get the real world azimuth of the target relative to the current position
-    target = tableToWorld(target) --convert the table coordinates to world coordinates
     return math.atan(target.x-currentGPSPositionX,target.y-currentGPSPositionY) --calculate the azimuth 
 end
 
-function navigate() --navigate to the target
-    if path[1] then
-        targetYaw = getTargetYaw(path[1]) --get the azimuth of the next node in the path
+function navigate(path) --navigate to the target
+    if path[2] then --if there is a next node in the path
+        targetYaw = getTargetYaw(calculateTargetPoint(path)) --get the azimuth of the next node in the path
+    else
+        targetYaw = getTargetYaw(path[1]) --get the azimuth of the last node in the path
     end
     yawOutput = - (math.fmod(((-currentAzimuth/ (2*math.pi)))-(targetYaw/(2*math.pi))+1.5,1)-0.5) --calculate the difference between current azimuth and target azimuth in turns
+end
+
+function calculateTargetPoint(path) --calculate the optimal target in the path
+    targetNode = tableToWorld(path[2])
+    previousTargetNode = tableToWorld(path[1])
+
+    totalDistance = heuristic(previousTargetNode, targetNode)
+    remainingDistance = heuristic({x = currentGPSPositionX, y = currentGPSPositionY}, targetNode)
+
+    -- interpolate the target point based on the distance to the next node
+    targetPoint = {x = targetNode.x - (targetNode.x - previousTargetNode.x) * (remainingDistance/totalDistance * (1 - smoothingFactor)), y = targetNode.y - (targetNode.y - previousTargetNode.y) * (remainingDistance/totalDistance * (1 - smoothingFactor))}
+    
+  
+    return targetPoint
+end
+
+function mergePathNodes(path) --remove redundant nodes from the path
+    local mergedPath = {}
+    local previousNode = path[1]
+    local previousVector = {x = 0, y = 0}
+    for _, node in ipairs(path) do
+        local vector = toVector(previousNode.x, previousNode.y, node.x, node.y) --calculate the vector between the previous node and the current node
+        if vector.x ~= previousVector.x or vector.y ~= previousVector.y then --if the vector is not the same as the previous vector, add the node to the merged path
+            table.insert(mergedPath, previousNode)
+            previousVector = vector --set the previous vector to the current vector
+        end
+        previousNode = node --set the previous node to the current node
+    end
+    table.insert(mergedPath, previousNode) --add the last node to the merged path
+    return mergedPath --return the merged path
+
+end
+
+function toVector(x1, y1, x2, y2) --convert two points to a vector
+    return {x = x2 - x1, y = y2 - y1}
 end
 
 oldGoal = {x = 0, y = 0} --set the old goal to 0,0
@@ -428,6 +471,9 @@ function onTick()-- the main function that runs every tick
         if start.x == 0 or start.y == 0 then 
             start = currentNode --set the start node for the pathfinding algorithm
         end
+
+        path = aStar(goalNode) --run the pathfinding algorithm
+
         if checkPathForObstructions(path) then --if the path is obstructed, restart pathfinding
             start = currentNode
             refreshPathFinding = true
@@ -436,9 +482,9 @@ function onTick()-- the main function that runs every tick
             refreshPathFinding = true
             oldGoal = goalNode
         end
-        path = aStar(goalNode) --run the pathfinding algorithm
+        
 
-        navigate() --get the yaw output for the next node in the path
+        navigate(mergePathNodes(path)) --get the yaw output for the next node in the path
         output.setNumber(4, 4*yawOutput)
 
     end
