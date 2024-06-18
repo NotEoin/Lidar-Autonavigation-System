@@ -48,7 +48,7 @@ do
 
         simulator:setInputNumber(18, 999)  -- set distance reading for laser
 
-        simulator:setInputNumber(19, -1000)  -- set target x coord
+        simulator:setInputNumber(19, -100000)  -- set target x coord
         simulator:setInputNumber(20, -100000)  -- set target y coord
 
 
@@ -135,56 +135,35 @@ function laserSweep()
     laserSweepAngleInRadians = laserSweepAngle * 2 * math.pi
 
     --we imagine the place the laser is pointing as a vector in 3D space
-    
-    X = 0
-    Y = 0
-    Z = 1
-
     --we then rotate this vector in the x and y direction based on the pitch and roll of the vehicle, as well as the desired sweep angle
-
-    --y axis rotation
-    X1 = (Z * math.sin(laserSweepAngleInRadians))
-    Y1 = Y
-    Z1 = (Z * math.cos(laserSweepAngleInRadians))
-
-    --x axis rotation
-    X2 = X1
-    Y2 = - (Z1 * math.sin(currentPitch))
-    Z2 =  (Z1 * math.cos(currentPitch))
-
-    X6 = 1
-    Y6 = 0
-    Z6 = 0
-
-    --Z axis rotation
-    X3 = (X6*math.cos(currentRoll)) 
-    Y3 = (X6 * math.sin(currentRoll)) 
-    Z3 = Z6
+    -- x and y axis rotation
+    X2 = (math.sin(laserSweepAngleInRadians))
+    Y2 = - ((math.cos(laserSweepAngleInRadians)) * math.sin(currentPitch))
+    Z2 =  ((math.cos(laserSweepAngleInRadians)) * math.cos(currentPitch))
 
     -- i honestly cant remember exactly what all this math does, but it works so im not going to touch it
 
-    --calculatte new rotation
+    --perform Z axis rotation and calculate new rotation
 
-    currentRoll = math.atan(Y3,X3)
+
+    currentRoll = math.atan((math.sin(currentRoll)) ,(math.cos(currentRoll)))
+
 
     --Z axis rotation
     X5 = (X2*math.cos(currentRoll)) - (Y2 * math.sin(currentRoll))
     Y5 = (X2 * math.sin(currentRoll)) + (Y2 * math.cos(currentRoll))
-    Z5 = Z2
     
 
-    laserYaw = math.atan(X5,Z5) -- calculate the yaw value for the laser
+    laserYaw = math.atan(X5,Z2) -- calculate the yaw value for the laser
 
     output.setNumber(1,8 * laserYaw/(2*math.pi)) -- output the pitch value for the laser
     
     -- as the way the laser angle is controlled works a bit funny, we need to apply another rotation to make it behave as expected
 
     --y axis rotation
-    X4 = (Z5 * math.sin(-laserYaw)) + (X5 * math.cos(-laserYaw))
-    Y4 = Y5
-    Z4 = (Z5 * math.cos(-laserYaw)) - (X5 * math.sin(-laserYaw))
+    Z4 = (Z2 * math.cos(-laserYaw)) - (X5 * math.sin(-laserYaw))
 
-    output.setNumber(2,8 * math.atan(Y4,Z4)/(2*math.pi)) -- output the yaw value for the laser
+    output.setNumber(2,8 * math.atan(Y5,Z4)/(2*math.pi)) -- output the yaw value for the laser
 
 end
 
