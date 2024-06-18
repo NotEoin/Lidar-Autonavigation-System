@@ -19,6 +19,7 @@ do
     simulator = simulator
     simulator:setScreen(1, "3x3")
     simulator:setProperty("Resolution", 25)
+    simulator:setProperty("Min Distance", 25)
     simulator:setProperty("Max Distance", 1000)
     simulator:setProperty("Sweep Speed", 1)
     simulator:setProperty("Max gScore", 150)
@@ -58,6 +59,10 @@ do
            yPosition = yPosition + math.cos(targetYaw)
            xPosition = xPosition + math.sin(targetYaw)
         end
+        if simulator:getIsToggled(2) then --if button 2 is toggled
+            simulator:setInputNumber(19, 100000)  -- set target x coord
+            simulator:setInputNumber(20, -50000)  -- set target y coord
+        end
 
 
         --convert screen touch to map coordinate
@@ -82,6 +87,7 @@ buffersize = 5 --size of the buffer for the yaw values, this buffer compensates 
 
 resolution = property.getNumber("Resolution") --how many nodes the map is divided into
 maxLaserRange = property.getNumber("Max Distance") --maximum distance the laser can detect
+minLaserRange = property.getNumber("Min Distance") --minimum distance the laser can detect
 laserSweepSpeed = property.getNumber("Sweep Speed") --speed of the laser sweep
 maxGScore = property.getNumber("Max gScore") --maximum value for the gScore in the A* algorithm
 smoothingFactor = property.getNumber("Smoothing Factor") --smoothing factor for the path
@@ -179,7 +185,7 @@ function getLaserTargetCoordinates() --gets the coords of the laser point
 end
 
 function addObstructedNode(worldCoord)-- add a node to the obstruction graph
-    if laserDistanceReading < maxLaserRange and laserDistanceReading > 0 then --if the detected target is within the maximum specified range
+    if laserDistanceReading < maxLaserRange and laserDistanceReading > minLaserRange then --if the detected target is within the maximum specified range
         local tableCoord = worldToTable(worldCoord) --convert the world coordinates to a suitable table entry
 
         if not isObstructed(tableCoord) then --if the node is not already in the graph
