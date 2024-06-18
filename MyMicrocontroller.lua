@@ -211,9 +211,17 @@ function isObstructed(node) --check if a node is obstructed
     return false
 end
 
--- euclidian distance for A* algorithm heuristic score
-function heuristic(node, goal)
+-- euclidian distance using pythagoras' theorem
+function euclidian(node, goal)
     return math.sqrt((node.x - goal.x)^2 + (node.y - goal.y)^2)
+end
+
+-- octile distance heuristic for A* algorithm
+function heuristic(node, goal)
+    dx = math.abs(node.x - goal.x) --calculate the difference in x coordinates
+    dy = math.abs(node.y - goal.y) --calculate the difference in y coordinates
+
+    return (dx + dy) - 0.6 * math.min(dx, dy) --return the octile distance 
 end
 
 -- Function to retrieve neighbors of a node
@@ -309,7 +317,7 @@ function aStar(goal)
             if not isObstructed(neighbor) then -- check if the neighbor node is obstructed
                 local tentative_gScore
                 if index > 4 then -- if the neighbor is a diagonal node, increment the gScore by 1.4
-                    tentative_gScore = gScore[current.x .. "," .. current.y] + 1.4
+                    tentative_gScore = gScore[current.x .. "," .. current.y] + 1.3
                 else -- if the neighbor is not a diagonal node, increment the gScore by 1
                     tentative_gScore = gScore[current.x .. "," .. current.y] + 1
                 end
@@ -394,8 +402,8 @@ function calculateTargetPoint(path) --calculate the optimal target in the path
     targetNode = tableToWorld(path[2])
     previousTargetNode = tableToWorld(path[1])
 
-    totalDistance = heuristic(previousTargetNode, targetNode)
-    remainingDistance = heuristic({x = currentGPSPositionX, y = currentGPSPositionY}, targetNode)
+    totalDistance = euclidian(previousTargetNode, targetNode)
+    remainingDistance = euclidian({x = currentGPSPositionX, y = currentGPSPositionY}, targetNode)
 
     -- interpolate the target point based on the distance to the next node
     targetPoint = {x = targetNode.x - (targetNode.x - previousTargetNode.x) * (remainingDistance/totalDistance * (1 - smoothingFactor)), y = targetNode.y - (targetNode.y - previousTargetNode.y) * (remainingDistance/totalDistance * (1 - smoothingFactor))}
