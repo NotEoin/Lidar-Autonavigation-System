@@ -272,7 +272,6 @@ end
 
 openSet = {} -- The set of nodes to be evaluated
 cameFrom = {} -- The map of navigated nodes
-goesTo = {} -- The map of navigated nodes
 gScore = {} -- Cost from start along best known path
 fScore = {} -- Estimated total cost from start to goal
 
@@ -281,7 +280,7 @@ current = {x=0, y=0} -- Current node
 
 path = {}
 
-refreshPathFinding = false -- Flag to refresh the path
+refreshPathFinding = true -- Flag to refresh the path
 pathFound = false -- Flag to check if a path has been found
 
 maxGScoreReached = false
@@ -296,7 +295,6 @@ function aStar(goal)
 
         openSet = {start} -- The set of nodes to be evaluated
         cameFrom = {} -- The map of navigated nodes
-        goesTo = {} -- The map of navigated nodes
         current = start -- Current node
 
         gScore = {[start.x .. "," .. start.y] = 0} -- Cost from start along best known path
@@ -322,13 +320,8 @@ function aStar(goal)
                     tentative_gScore = gScore[current.x .. "," .. current.y] + 1
                 end
                 local neighborKey = neighbor.x .. "," .. neighbor.y
-                local currentKey = current.x .. "," .. current.y
                 if tentative_gScore < (gScore[neighborKey] or math.huge) then
                     cameFrom[neighborKey] = current -- best path so far
-                    if not goesTo[currentKey] then
-                        goesTo[currentKey] = {}
-                    end
-                    table.insert(goesTo[currentKey], neighbor)
                     gScore[neighborKey] = tentative_gScore -- update the gScore
                     fScore[neighborKey] = tentative_gScore + heuristic(neighbor, goal) -- update the fScore
                     
@@ -340,26 +333,18 @@ function aStar(goal)
                 end
             end
         end
-    end
-    totalIterations = 0
-
-    path = reconstructPath(cameFrom, current) --construct the most efficient path
-
-    if pathFound and contains(path, currentNode) then --if a path has been found and the first node is the current node
-        rebasedCameFrom = {} --reset the rebased cameFrom map
-        rebasedGoesTo = {} --reset the rebased goesTo map
-
-        if rebasePathTree(currentNode) then --if the next node is in the map
-            cameFrom = rebasedCameFrom --rebase the cameFrom map
-            goesTo = rebasedGoesTo --rebase the goesTo map
+        path = reconstructPath(cameFrom, current) --construct the most efficient path
+        table.insert(path, #path + 1, goal) --add the start node to the path
+    end    
+    if contains(path, currentNode) then
+        while contains(path, currentNode) do
+            table.remove(path, 1)
         end
+        table.insert(path, 1, currentNode)
     end
 
     return path --merge the path and return it
 end
-
-rebasedCameFrom = {} --rebased cameFrom map
-rebasedGoesTo = {} --rebased goesTo map
 
 function contains(table, element) --check if a table contains an element
     for _, value in ipairs(table) do
@@ -368,19 +353,6 @@ function contains(table, element) --check if a table contains an element
         end
     end
     return false
-end
-
-function rebasePathTree(node) --rebase the cameFrom and goesTo maps to a given node
-    if goesTo[node.x .. "," .. node.y] then
-        for _, neighbor in ipairs(goesTo[node.x .. "," .. node.y]) do
-            rebasedCameFrom[neighbor.x .. "," .. neighbor.y] = node
-            rebasedGoesTo[node.x .. "," .. node.y] = goesTo[node.x .. "," .. node.y]
-            rebasePathTree(neighbor)
-        end
-        return true
-    else
-        return false
-    end
 end
 
 targetYaw = 0 --set the target yaw to 0
