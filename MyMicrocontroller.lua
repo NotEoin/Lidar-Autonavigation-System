@@ -401,6 +401,14 @@ function mergePathNodes(path) --remove redundant nodes from the path
 
 end
 
+function pruneObstructions() --prune the obstructions table
+    for pos, node in ipairs(obstructedNodesTable) do
+        if heuristic(node, currentNode) > maxGScore then
+            table.remove(obstructedNodesTable, pos)
+        end
+    end
+end
+
 function toVector(x1, y1, x2, y2) --convert two points to a vector
     return {x = x2 - x1, y = y2 - y1}
 end
@@ -451,6 +459,8 @@ function onTick()-- the main function that runs every tick
 
         navigate(mergePathNodes(path)) --get the yaw output for the next node in the path
         output.setNumber(4, 4*yawOutput)
+
+        pruneObstructions() --remove obstructions that are too far away
 
     end
 
