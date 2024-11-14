@@ -24,6 +24,7 @@ do
     simulator:setProperty("Sweep Speed", 1)
     simulator:setProperty("Max gScore", 150)
     simulator:setProperty("Smoothing Factor", 0.1)
+    simulator:setProperty("Cell Size", 25)
 
     -- Runs every tick just before onTick; allows you to simulate the inputs changing
     ---@param simulator Simulator Use simulator:<function>() to set inputs etc.
@@ -63,6 +64,11 @@ do
             simulator:setInputNumber(19, 100000)  -- set target x coord
             simulator:setInputNumber(20, -50000)  -- set target y coord
         end
+        if simulator:getIsToggled(3) then --if button 3 is toggled, toggle between laser distance readings of 999 and 1000
+            simulator:setInputNumber(18, 999)
+        else
+            simulator:setInputNumber(18, 1000)
+        end
 
 
         --convert screen touch to map coordinate
@@ -85,15 +91,15 @@ ticks = 0
 
 buffersize = 5 --size of the buffer for the yaw values, this buffer compensates for 5 ticks of delay between yaw values and sensor readings
 
-resolution = property.getNumber("Resolution") --how many nodes the map is divided into
+cellSize = property.getNumber("Cell Size") --how many nodes the map is divided into
 maxLaserRange = property.getNumber("Max Distance") --maximum distance the laser can detect
 minLaserRange = property.getNumber("Min Distance") --minimum distance the laser can detect
 laserSweepSpeed = property.getNumber("Sweep Speed") --speed of the laser sweep
 maxGScore = property.getNumber("Max gScore") --maximum value for the gScore in the A* algorithm
 smoothingFactor = property.getNumber("Smoothing Factor") --smoothing factor for the path
 
+resolution = (maxLaserRange*2)/cellSize --resolution of the map
 scale = maxLaserRange/500 --scale of the map on the screen, based on the max distance of laser detection
-cellSize = (maxLaserRange*2)/resolution --size of each square node on the map
 epsilon = cellSize/2 --distance between centre of node and edge of node
 
 sweepRight = true --global boolean to determine the direction of the laser sweep
