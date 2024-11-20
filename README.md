@@ -1,5 +1,8 @@
 # Laser-Guided Pathfinding and Obstacle Detection System for Stormworks
 
+<img src="./media/debug screen.png" style="width:4in"
+alt="A screenshot of the debug screen" />
+
 ### Project Overview
 This project is a **Laser-Guided Pathfinding and Obstacle Detection System**, an advanced LUA script that enables autonomous navigation and obstacle avoidance for vehicles in the physics-based simulation game Stormworks: Build and Rescue. Utilizing the LifeBoatAPI, this script implements real-time scanning, pathfinding, and movement adjustments to guide a vehicle towards a specified target, avoiding detected obstructions along the way.
 
