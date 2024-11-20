@@ -1,6 +1,6 @@
 # Laser-Guided Pathfinding and Obstacle Detection System for Stormworks
 
-<img src="./media/debug screen.png" style="width:4in"
+<img src="./media/Debug Screen.png" style="width:4in"
 alt="A screenshot of the debug screen" />
 
 ### Project Overview
